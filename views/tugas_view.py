@@ -1,354 +1,552 @@
-import sys
 import os
+import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from datetime import datetime, date
-
 import customtkinter as ctk
-from tkinter import ttk, messagebox
-from controllers.tugas_controller import TugasController
+from tkinter import messagebox
+from controllers.tugas_controller import TugasController, STATUS_TUGAS
 
-ctk.set_appearance_mode("System")
+ctk.set_appearance_mode("Light")
 ctk.set_default_color_theme("blue")
 
-FORMAT_TANGGAL = "%Y-%m-%d"
+# ------------------------------------------------------------------ Akun login
+# Laporan (hal. Login) meminta NIM + kata sandi, tetapi belum mendefinisikan tabel pengguna.
+# Sementara, akun disimpan di sini. Ganti sesuai kebutuhan kelompok.
+NIM_ANGGOTA = [
+    "F5212520082", "F5212530092", "F5212530112",
+    "F5212530096", "F5212530099", "F5212530095",
+]
+KATA_SANDI = "kelompok2"
+AKUN = {nim: KATA_SANDI for nim in NIM_ANGGOTA}
+
+# ------------------------------------------------------------ Palet (dari mockup laporan)
+BG = "#f4f8fd"
+BIRU = "#1f6fd0"
+BIRU_H = "#1859ab"
+NAVY = "#132b5e"
+NAVY_SOFT = "#2c4a7c"
+MUTED = "#5b6f94"
+BORDER = "#c9d8ec"
+INPUT_BORDER = "#9db4d8"
+HEADER_BG = "#e3f0fd"
+HEADER_FG = "#1f4a96"
+ROW_ALT = "#f6f9fe"
+AMBER = "#b07400"
+AMBER_H = "#8f5f00"
+MERAH = "#c0392b"
+MERAH_H = "#9c2e22"
+PLACEHOLDER = "#7d8798"
+
 FONT = "Segoe UI"
 
-# Palet sederhana: satu warna aksen, sisanya netral (terang, gelap)
-AKSEN = ("#2f5d8a", "#4a7fb0")
-AKSEN_HOVER = ("#244a70", "#3b6a96")
-BAHAYA = ("#b04a45", "#c0605a")
-BAHAYA_HOVER = ("#8f3a36", "#a24e49")
-LATAR = ("#f3f4f6", "#1e1f22")
-KARTU = ("#ffffff", "#2a2b2f")
-GARIS = ("#d5d8dd", "#3c3e43")
-TEKS_REDUP = ("#6b7280", "#9aa0a8")
+
+def f(ukuran, tebal=False):
+    return ctk.CTkFont(FONT, ukuran, "bold" if tebal else "normal")
 
 
-class TugasView(ctk.CTk):
-    def __init__(self):
-        super().__init__()
-        self.controller = TugasController()
-        self.selected_id = None   # ID asli dari database (dipakai untuk ubah/hapus)
-        self.data_cache = {}      # {id_tugas: row dict}
-        self.nomor = {}           # {id_tugas: nomor urut tampilan}
+GAYA_TOMBOL = {
+    "biru": dict(fg_color=BIRU, hover_color=BIRU_H, text_color="white", border_width=0),
+    "amber": dict(fg_color=AMBER, hover_color=AMBER_H, text_color="white", border_width=0),
+    "merah": dict(fg_color=MERAH, hover_color=MERAH_H, text_color="white", border_width=0),
+    "garis": dict(fg_color="white", hover_color="#eaf2fc", text_color=NAVY_SOFT,
+                  border_width=1, border_color=INPUT_BORDER),
+    "garis_biru": dict(fg_color="white", hover_color="#eaf2fc", text_color=BIRU,
+                       border_width=2, border_color=BIRU),
+}
 
-        self.title("Sistem Pengelolaan Tugas Mahasiswa")
-        self.geometry("1100x600")
-        self.minsize(950, 520)
-        self.configure(fg_color=LATAR)
 
-        self.grid_columnconfigure(1, weight=1)
+def tombol(parent, teks, perintah, gaya="biru", **kw):
+    opsi = dict(height=46, corner_radius=10, font=f(14, True))
+    opsi.update(GAYA_TOMBOL[gaya])
+    opsi.update(kw)
+    return ctk.CTkButton(parent, text=teks, command=perintah, **opsi)
+
+
+def label(parent, teks, **kw):
+    return ctk.CTkLabel(parent, text=teks, font=f(14, True), text_color=NAVY, anchor="w", **kw)
+
+
+def kolom_input(parent, placeholder, **kw):
+    opsi = dict(height=44, corner_radius=8, border_width=1, border_color=INPUT_BORDER,
+                fg_color="white", text_color=NAVY, placeholder_text=placeholder,
+                placeholder_text_color=PLACEHOLDER, font=f(14))
+    opsi.update(kw)
+    return ctk.CTkEntry(parent, **opsi)
+
+
+def kosongkan(entry):
+    """Kosongkan CTkEntry lalu pastikan teks petunjuk (placeholder) tampil kembali.
+    CTkEntry.delete() saja tidak memunculkan placeholder karena status fokus awalnya keliru."""
+    entry.delete(0, "end")
+    try:
+        if entry.focus_get() is not entry._entry:
+            entry._activate_placeholder()
+    except Exception:
+        pass
+
+
+class TextboxPlaceholder(ctk.CTkTextbox):
+    """CTkTextbox dengan teks petunjuk (placeholder)."""
+
+    def __init__(self, master, placeholder, **kw):
+        super().__init__(master, text_color=NAVY, **kw)
+        self._ph = placeholder
+        self._aktif = False
+        self.bind("<FocusIn>", self._hapus_ph)
+        self.bind("<Key>", self._hapus_ph)
+        self.bind("<FocusOut>", self._tampil_ph)
+        self._tampil_ph()
+
+    def _tampil_ph(self, _=None):
+        if not self._aktif and not self.get("0.0", "end").strip():
+            self.delete("0.0", "end")
+            self.insert("0.0", self._ph)
+            self.configure(text_color=PLACEHOLDER)
+            self._aktif = True
+
+    def _hapus_ph(self, _=None):
+        if self._aktif:
+            self.delete("0.0", "end")
+            self.configure(text_color=NAVY)
+            self._aktif = False
+
+    def ambil(self):
+        return "" if self._aktif else self.get("0.0", "end").strip()
+
+    def isi(self, teks):
+        self._aktif = False
+        self.delete("0.0", "end")
+        self.configure(text_color=NAVY)
+        if teks:
+            self.insert("0.0", teks)
+        else:
+            self._tampil_ph()
+
+
+def buat_header(parent, eyebrow, judul, app):
+    bar = ctk.CTkFrame(parent, fg_color="transparent")
+    bar.pack(fill="x", padx=70, pady=(34, 18))
+    kiri = ctk.CTkFrame(bar, fg_color="transparent")
+    kiri.pack(side="left")
+    lbl = ctk.CTkLabel(kiri, text=eyebrow, font=f(13), text_color=MUTED, anchor="w")
+    lbl.pack(anchor="w")
+    ctk.CTkLabel(kiri, text=judul, font=f(32, True), text_color=NAVY, anchor="w").pack(anchor="w")
+    tombol(bar, "Kembali ke utama", lambda: app.tampil("dashboard"), "garis",
+           width=170, height=42, font=f(14)).pack(side="right", anchor="n")
+    return lbl
+
+
+class Halaman(ctk.CTkFrame):
+    def __init__(self, master, app):
+        super().__init__(master, fg_color=BG, corner_radius=0)
+        self.app = app
+        self.ctrl = app.controller
+
+    def on_show(self, **kwargs):
+        pass
+
+
+# =========================================================== Halaman Login
+class LoginPage(Halaman):
+    def __init__(self, master, app):
+        super().__init__(master, app)
+        self.grid_columnconfigure((0, 1), weight=1, uniform="kol")
         self.grid_rowconfigure(0, weight=1)
 
-        self._buat_form()
-        self._buat_tabel()
-        self._atur_gaya_tabel()
+        kiri = ctk.CTkFrame(self, fg_color=BIRU, corner_radius=0)
+        kiri.grid(row=0, column=0, sticky="nsew")
+        isi = ctk.CTkFrame(kiri, fg_color="transparent")
+        isi.place(relx=0.5, rely=0.5, anchor="center")
+        ctk.CTkLabel(isi, text="SELAMAT DATANG", font=f(13), text_color="#cfe2fb",
+                     anchor="w").pack(anchor="w", pady=(0, 10))
+        ctk.CTkLabel(isi, text="Sistem Pengelolaan\nTugas Mahasiswa", font=f(38, True),
+                     text_color="white", justify="left", anchor="w").pack(anchor="w")
+        ctk.CTkLabel(isi, text="Masuk untuk mencatat, memantau, dan merapikan\nseluruh tugas kuliah.",
+                     font=f(16), text_color="#e6f0fc", justify="left",
+                     anchor="w").pack(anchor="w", pady=(18, 0))
 
-        self.load_data()
-        self._set_mode_edit(False)
+        kanan = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
+        kanan.grid(row=0, column=1, sticky="nsew")
+        kartu = ctk.CTkFrame(kanan, fg_color="white", corner_radius=18, border_width=1,
+                             border_color=BORDER)
+        kartu.place(relx=0.5, rely=0.5, anchor="center")
+        dalam = ctk.CTkFrame(kartu, fg_color="transparent")
+        dalam.pack(padx=42, pady=38)
 
-    # ------------------------------------------------------------------ UI
-    def _buat_form(self):
-        self.frame_form = ctk.CTkFrame(self, width=330, corner_radius=8, fg_color=KARTU,
-                                       border_width=1, border_color=GARIS)
-        self.frame_form.grid(row=0, column=0, padx=(14, 7), pady=14, sticky="nsew")
-        self.frame_form.grid_propagate(False)
+        ctk.CTkLabel(dalam, text="Login", font=f(28, True), text_color=NAVY,
+                     anchor="w").pack(anchor="w", pady=(0, 16))
+        label(dalam, "NIM").pack(anchor="w", pady=(0, 6))
+        self.e_nim = kolom_input(dalam, "Masukkan NIM", width=380, height=48)
+        self.e_nim.pack(pady=(0, 16))
+        label(dalam, "Kata sandi").pack(anchor="w", pady=(0, 6))
+        self.e_sandi = kolom_input(dalam, "Masukkan kata sandi", width=380, height=48, show="•")
+        self.e_sandi.pack(pady=(0, 14))
 
-        ctk.CTkLabel(self.frame_form, text="Data Tugas", anchor="w",
-                     font=ctk.CTkFont(FONT, 18, "bold")).pack(fill="x", padx=20, pady=(20, 0))
-        self.label_mode = ctk.CTkLabel(self.frame_form, text="", anchor="w",
-                                       font=ctk.CTkFont(FONT, 12), text_color=TEKS_REDUP)
-        self.label_mode.pack(fill="x", padx=20, pady=(0, 14))
+        self.cek = ctk.CTkCheckBox(dalam, text="Tampilkan kata sandi", command=self._toggle,
+                                   font=f(14), text_color=NAVY_SOFT, fg_color=BIRU,
+                                   hover_color=BIRU_H, border_color=INPUT_BORDER,
+                                   checkbox_width=22, checkbox_height=22, corner_radius=5)
+        self.cek.pack(anchor="w", pady=(0, 14))
 
-        self._label("Judul")
-        self.entry_judul = ctk.CTkEntry(self.frame_form, height=34, corner_radius=6,
-                                        font=ctk.CTkFont(FONT, 13), border_color=GARIS,
-                                        placeholder_text="Contoh: Praktikum Modul 3")
-        self.entry_judul.pack(padx=20, pady=(2, 12), fill="x")
+        self.lbl_error = ctk.CTkLabel(dalam, text="", font=f(13), text_color=MERAH, anchor="w")
+        self.lbl_error.pack(anchor="w")
+        tombol(dalam, "Masuk", self.masuk, "biru", width=380, height=50,
+               font=f(16, True)).pack(pady=(4, 0))
 
-        self._label("Deskripsi")
-        self.entry_deskripsi = ctk.CTkTextbox(self.frame_form, height=120, corner_radius=6,
-                                              font=ctk.CTkFont(FONT, 13), border_width=2,
-                                              border_color=GARIS)
-        self.entry_deskripsi.pack(padx=20, pady=(2, 12), fill="x")
+        for e in (self.e_nim, self.e_sandi):
+            e.bind("<Return>", lambda ev: self.masuk())
 
-        self._label("Deadline")
-        self.entry_deadline = ctk.CTkEntry(self.frame_form, height=34, corner_radius=6,
-                                           font=ctk.CTkFont(FONT, 13), border_color=GARIS,
-                                           placeholder_text="YYYY-MM-DD")
-        self.entry_deadline.pack(padx=20, pady=(2, 20), fill="x")
+    def _toggle(self):
+        self.e_sandi.configure(show="" if self.cek.get() else "•")
 
-        # Semua tombol dibuat di sini, ditampilkan sesuai mode
-        self.frame_tombol = ctk.CTkFrame(self.frame_form, fg_color="transparent")
-        self.frame_tombol.pack(fill="x", padx=20)
+    def masuk(self):
+        nim = self.e_nim.get().strip()
+        sandi = self.e_sandi.get()
+        if AKUN.get(nim) == sandi and nim:
+            self.on_show()
+            self.app.tampil("dashboard")
+        else:
+            self.lbl_error.configure(text="NIM atau kata sandi salah.")
 
-        kw = dict(height=36, corner_radius=6, font=ctk.CTkFont(FONT, 13))
-        self.btn_tambah = ctk.CTkButton(self.frame_tombol, text="Tambah", command=self.clear_form,
-                                        fg_color="transparent", border_width=1, border_color=AKSEN,
-                                        text_color=AKSEN, hover_color=("#e6edf5", "#2f3a47"), **kw)
-        self.btn_simpan = ctk.CTkButton(self.frame_tombol, text="Simpan", command=self.simpan_data,
-                                        fg_color=AKSEN, hover_color=AKSEN_HOVER, **kw)
-        self.btn_ubah = ctk.CTkButton(self.frame_tombol, text="Ubah", command=self.ubah_data,
-                                      fg_color=AKSEN, hover_color=AKSEN_HOVER, **kw)
-        self.btn_hapus = ctk.CTkButton(self.frame_tombol, text="Hapus", command=self.hapus_data,
-                                       fg_color=BAHAYA, hover_color=BAHAYA_HOVER, **kw)
+    def on_show(self, **kwargs):
+        kosongkan(self.e_nim)
+        kosongkan(self.e_sandi)
+        self.cek.deselect()
+        self.e_sandi.configure(show="•")
+        self.lbl_error.configure(text="")
 
-    def _label(self, teks):
-        ctk.CTkLabel(self.frame_form, text=teks, anchor="w", font=ctk.CTkFont(FONT, 12),
-                     text_color=TEKS_REDUP).pack(fill="x", padx=22)
 
-    def _buat_tabel(self):
-        self.frame_tabel = ctk.CTkFrame(self, corner_radius=8, fg_color=KARTU,
-                                        border_width=1, border_color=GARIS)
-        self.frame_tabel.grid(row=0, column=1, padx=(7, 14), pady=14, sticky="nsew")
-        self.frame_tabel.grid_columnconfigure(0, weight=1)
-        self.frame_tabel.grid_rowconfigure(1, weight=1)
+# ========================================================= Halaman Dashboard
+class DashboardPage(Halaman):
+    def __init__(self, master, app):
+        super().__init__(master, app)
+        ctk.CTkLabel(self, text="HALAMAN UTAMA", font=f(13), text_color=MUTED,
+                     anchor="w").pack(fill="x", padx=70, pady=(58, 0))
+        ctk.CTkLabel(self, text="Sistem Pengelolaan Tugas Mahasiswa", font=f(36, True),
+                     text_color=NAVY, anchor="w").pack(fill="x", padx=70)
+        ctk.CTkLabel(self, text="Catat, pantau, dan rapikan seluruh tugas kuliah dalam satu aplikasi.",
+                     font=f(16), text_color=MUTED, anchor="w").pack(fill="x", padx=70, pady=(4, 28))
 
-        bar = ctk.CTkFrame(self.frame_tabel, fg_color="transparent")
-        bar.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 8))
-        bar.grid_columnconfigure(0, weight=1)
+        label(self, "Ringkasan tugas").pack(fill="x", padx=70, pady=(0, 10))
+        baris = ctk.CTkFrame(self, fg_color="transparent")
+        baris.pack(fill="x", padx=70)
+        baris.grid_columnconfigure((0, 1, 2), weight=1, uniform="kartu")
+        self.angka = {}
+        for i, (kunci, judul) in enumerate([("total", "Jumlah seluruh tugas"),
+                                            ("belum", "Belum selesai"),
+                                            ("selesai", "Sudah selesai")]):
+            k = ctk.CTkFrame(baris, fg_color="white", corner_radius=14, border_width=1,
+                             border_color=BORDER)
+            k.grid(row=0, column=i, sticky="ew", padx=(0 if i == 0 else 12, 0 if i == 2 else 12))
+            ctk.CTkLabel(k, text=judul, font=f(15), text_color=MUTED,
+                         anchor="w").pack(fill="x", padx=32, pady=(24, 0))
+            lbl = ctk.CTkLabel(k, text="00", font=f(46, True), text_color=BIRU, anchor="w")
+            lbl.pack(fill="x", padx=32, pady=(0, 20))
+            self.angka[kunci] = lbl
 
-        self.entry_cari = ctk.CTkEntry(bar, height=34, corner_radius=6, border_color=GARIS,
-                                       font=ctk.CTkFont(FONT, 13),
-                                       placeholder_text="Cari judul atau deskripsi")
-        self.entry_cari.grid(row=0, column=0, sticky="ew")
-        # bind KeyRelease (bukan textvariable) supaya placeholder tetap tampil
-        self.entry_cari.bind("<KeyRelease>", lambda e: self.tampilkan_data())
+        label(self, "Navigasi").pack(fill="x", padx=70, pady=(34, 10))
+        nav = ctk.CTkFrame(self, fg_color="transparent")
+        nav.pack(fill="x", padx=70)
+        nav.grid_columnconfigure((0, 1), weight=1, uniform="nav")
+        tombol(nav, "Formulir Tugas", lambda: app.tampil("form"), "biru", height=60,
+               corner_radius=14, font=f(17, True)).grid(row=0, column=0, sticky="ew", padx=(0, 14))
+        tombol(nav, "Daftar Tugas", lambda: app.tampil("daftar"), "garis_biru", height=60,
+               corner_radius=14, font=f(17, True)).grid(row=0, column=1, sticky="ew", padx=(14, 0))
 
-        self.label_jumlah = ctk.CTkLabel(bar, text="0 tugas", font=ctk.CTkFont(FONT, 12),
-                                         text_color=TEKS_REDUP)
-        self.label_jumlah.grid(row=0, column=1, padx=(14, 0))
+    def on_show(self, **kwargs):
+        r = self.ctrl.ringkasan()
+        for kunci, lbl in self.angka.items():
+            lbl.configure(text=f"{r[kunci]:02d}")
 
-        wadah = ctk.CTkFrame(self.frame_tabel, fg_color="transparent")
-        wadah.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 8))
-        wadah.grid_columnconfigure(0, weight=1)
-        wadah.grid_rowconfigure(0, weight=1)
 
-        kolom = ("No", "Judul", "Deskripsi", "Deadline", "Status")
-        self.tree = ttk.Treeview(wadah, columns=kolom, show="headings", selectmode="browse")
-        for nama, lebar, rata, stretch in [
-            ("No", 55, "center", False),
-            ("Judul", 190, "w", False),
-            ("Deskripsi", 290, "w", True),
-            ("Deadline", 105, "center", False),
-            ("Status", 110, "center", False),
-        ]:
-            self.tree.heading(nama, text=nama, anchor=rata)
-            self.tree.column(nama, width=lebar, anchor=rata, stretch=stretch)
+# ============================================================ Halaman Formulir
+class FormPage(Halaman):
+    TEKS_STATUS = "Pilih status"
 
-        scroll = ctk.CTkScrollbar(wadah, command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scroll.set)
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        scroll.grid(row=0, column=1, sticky="ns", padx=(4, 0))
+    def __init__(self, master, app):
+        super().__init__(master, app)
+        self.id_edit = None
+        self.lbl_eyebrow = buat_header(self, "HALAMAN FORMULIR", "Formulir Tugas", app)
 
-        self.tree.bind("<<TreeviewSelect>>", self.pilih_baris)
-        self.tree.bind("<Button-1>", self.klik_tabel, add="+")
+        kartu = ctk.CTkFrame(self, fg_color="white", corner_radius=14, border_width=1,
+                             border_color=BORDER)
+        kartu.pack(fill="x", padx=70)
+        kartu.grid_columnconfigure((0, 1), weight=1, uniform="isi")
 
-        ctk.CTkLabel(self.frame_tabel, anchor="w", font=ctk.CTkFont(FONT, 11),
-                     text_color=TEKS_REDUP,
-                     text="Klik tugas untuk mengubah atau menghapus. Klik area kosong untuk kembali menambah."
-                     ).grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 12))
+        kiri, kanan = (36, 18), (18, 36)
+        label(kartu, "Nama tugas").grid(row=0, column=0, sticky="w", padx=kiri, pady=(28, 6))
+        label(kartu, "Mata kuliah").grid(row=0, column=1, sticky="w", padx=kanan, pady=(28, 6))
+        self.e_nama = kolom_input(kartu, "Tulis nama tugas")
+        self.e_nama.grid(row=1, column=0, sticky="ew", padx=kiri)
+        self.e_mk = kolom_input(kartu, "Tulis mata kuliah")
+        self.e_mk.grid(row=1, column=1, sticky="ew", padx=kanan)
 
-    def _atur_gaya_tabel(self):
-        gelap = ctk.get_appearance_mode() == "Dark"
-        bg = "#2a2b2f" if gelap else "#ffffff"
-        fg = "#e6e6e6" if gelap else "#1f2937"
-        head_bg = "#35373c" if gelap else "#eef0f3"
-        head_fg = "#e6e6e6" if gelap else "#374151"
-        seleksi = "#3b5b80" if gelap else "#dbe6f2"
-        genap = "#2f3034" if gelap else "#f8f9fa"
+        label(kartu, "Tanggal tenggat").grid(row=2, column=0, sticky="w", padx=kiri, pady=(18, 6))
+        label(kartu, "Status").grid(row=2, column=1, sticky="w", padx=kanan, pady=(18, 6))
+        self.e_tenggat = kolom_input(kartu, "hh/bb/tttt")
+        self.e_tenggat.grid(row=3, column=0, sticky="ew", padx=kiri)
+        self.cb_status = ctk.CTkComboBox(
+            kartu, values=list(STATUS_TUGAS), state="readonly", height=44, corner_radius=8,
+            border_width=1, border_color=INPUT_BORDER, fg_color="white", text_color=NAVY,
+            button_color=HEADER_BG, button_hover_color="#cfe2fb", font=f(14),
+            dropdown_fg_color="white", dropdown_text_color=NAVY,
+            dropdown_hover_color=HEADER_BG, dropdown_font=f(14))
+        self.cb_status.grid(row=3, column=1, sticky="ew", padx=kanan)
 
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("Treeview", background=bg, fieldbackground=bg, foreground=fg,
-                        rowheight=32, borderwidth=0, font=(FONT, 10))
-        style.configure("Treeview.Heading", background=head_bg, foreground=head_fg,
-                        font=(FONT, 10, "bold"), relief="flat", padding=(6, 8), borderwidth=0)
-        style.map("Treeview", background=[("selected", seleksi)],
-                  foreground=[("selected", fg)])
-        style.map("Treeview.Heading", background=[("active", head_bg)])
+        label(kartu, "Deskripsi").grid(row=4, column=0, columnspan=2, sticky="w", padx=36, pady=(18, 6))
+        self.t_deskripsi = TextboxPlaceholder(kartu, "Tulis deskripsi tugas", height=100,
+                                              corner_radius=8, border_width=1,
+                                              border_color=INPUT_BORDER, fg_color="white",
+                                              font=f(14))
+        self.t_deskripsi.grid(row=5, column=0, columnspan=2, sticky="ew", padx=36, pady=(0, 32))
 
-        self.tree.tag_configure("ganjil", background=bg)
-        self.tree.tag_configure("genap", background=genap)
-        self.tree.tag_configure("lewat", foreground="#c0392b" if not gelap else "#e07a72")
-        self.tree.tag_configure("segera", foreground="#b9770e" if not gelap else "#e0a24a")
+        self.baris_tombol = ctk.CTkFrame(self, fg_color="transparent")
+        self.baris_tombol.pack(anchor="w", padx=70, pady=22)
+        kw = dict(width=118, height=42, corner_radius=8)
+        self.btn_tambah = tombol(self.baris_tombol, "Tambah", self.tambah, "biru", **kw)
+        self.btn_edit = tombol(self.baris_tombol, "Edit", self.edit, "amber", **kw)
+        self.btn_bersih = tombol(self.baris_tombol, "Bersihkan", self.bersihkan, "garis", **kw)
+        self._atur_mode(False)
 
-    # --------------------------------------------------------------- Data
-    def load_data(self):
-        """Ambil data dari controller, urutkan berdasarkan ID, lalu tampilkan."""
-        try:
-            data = self.controller.get_daftar_tugas() or []
-        except Exception as e:
-            messagebox.showerror("Error Database", f"Gagal memuat data:\n{e}")
-            data = []
-
-        data = sorted(data, key=lambda r: int(r["id_tugas"]))
-        self.data_cache = {int(r["id_tugas"]): r for r in data}
-        # Nomor tampilan selalu 1..n tanpa bolong, ID asli tidak diubah
-        self.nomor = {id_: i for i, id_ in enumerate(self.data_cache, start=1)}
-        self.tampilkan_data()
-
-    def tampilkan_data(self):
-        kata = self.entry_cari.get().strip().lower()
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-
-        tampil = 0
-        for id_tugas, row in self.data_cache.items():
-            judul = str(row["judul_tugas"] or "")
-            deskripsi = str(row["deskripsi"] or "")
-            if kata and kata not in judul.lower() and kata not in deskripsi.lower():
-                continue
-
-            deadline = str(row["deadline"] or "")[:10]
-            status, tag_status = self._hitung_status(deadline)
-            tag_baris = "genap" if tampil % 2 else "ganjil"
-            tags = (tag_baris, tag_status) if tag_status else (tag_baris,)
-
-            # iid = ID asli, kolom pertama = nomor urut tampilan
-            self.tree.insert("", "end", iid=str(id_tugas), tags=tags,
-                             values=(self.nomor[id_tugas], judul,
-                                     deskripsi.replace("\n", " "), deadline, status))
-            tampil += 1
-
-        self.label_jumlah.configure(text=f"{tampil} tugas")
-
-        if self.selected_id is not None and self.tree.exists(str(self.selected_id)):
-            self.tree.selection_set(str(self.selected_id))
+    # -------------------------------------------------------------- helper
+    def _atur_mode(self, edit):
+        for b in (self.btn_tambah, self.btn_edit, self.btn_bersih):
+            b.pack_forget()
+        (self.btn_edit if edit else self.btn_tambah).pack(side="left", padx=(0, 14))
+        self.btn_bersih.pack(side="left")
 
     @staticmethod
-    def _hitung_status(deadline_str):
+    def _isi_entry(entry, teks):
+        kosongkan(entry)
+        if teks:
+            entry.insert(0, teks)
+
+    def _ambil(self):
+        return (self.e_nama.get(), self.e_mk.get(), self.t_deskripsi.ambil(),
+                self.e_tenggat.get(), self.cb_status.get())
+
+    def on_show(self, tugas=None):
+        if tugas:
+            self.id_edit = tugas["id"]
+            self._isi_entry(self.e_nama, tugas["nama_tugas"])
+            self._isi_entry(self.e_mk, tugas["mata_kuliah"])
+            self._isi_entry(self.e_tenggat, self.ctrl.tampil_tanggal(tugas["tenggat"]))
+            self.cb_status.set(tugas["status"])
+            self.t_deskripsi.isi(tugas["deskripsi"] or "")
+            self.lbl_eyebrow.configure(text=f"MENGUBAH TUGAS NO. {tugas['no']:03d}")
+            self._atur_mode(True)
+        else:
+            self.bersihkan()
+
+    # -------------------------------------------------------------- aksi
+    def tambah(self):
+        ok, pesan = self.ctrl.tambah(*self._ambil())
+        if ok:
+            messagebox.showinfo("Sukses", pesan)
+            self.bersihkan()
+        else:
+            messagebox.showwarning("Validasi", pesan)
+
+    def edit(self):
+        if self.id_edit is None:
+            messagebox.showwarning("Peringatan", "Pilih tugas dari Daftar Tugas terlebih dahulu.")
+            return
+        ok, pesan = self.ctrl.edit(self.id_edit, *self._ambil())
+        if ok:
+            messagebox.showinfo("Sukses", pesan)
+            self.bersihkan()
+            self.app.tampil("daftar")
+        else:
+            messagebox.showwarning("Validasi", pesan)
+
+    def bersihkan(self):
+        self.id_edit = None
+        for e in (self.e_nama, self.e_mk, self.e_tenggat):
+            self._isi_entry(e, "")
+        self.cb_status.set(self.TEKS_STATUS)
+        self.t_deskripsi.isi("")
+        self.lbl_eyebrow.configure(text="HALAMAN FORMULIR")
+        self._atur_mode(False)
+        self.focus()
+
+
+# ===================================================== Dialog ubah status
+class DialogStatus(ctk.CTkToplevel):
+    def __init__(self, master, nama, status_sekarang, on_simpan):
+        super().__init__(master, fg_color=BG)
+        self.on_simpan = on_simpan
+        self.title("Ubah Status")
+        self.geometry("400x250")
+        self.resizable(False, False)
+        self.transient(master)
+
+        ctk.CTkLabel(self, text="Ubah status tugas", font=f(18, True), text_color=NAVY,
+                     anchor="w").pack(fill="x", padx=28, pady=(24, 0))
+        ctk.CTkLabel(self, text=nama, font=f(13), text_color=MUTED, anchor="w",
+                     justify="left", wraplength=340).pack(fill="x", padx=28, pady=(2, 14))
+        self.var = ctk.StringVar(value=status_sekarang)
+        ctk.CTkComboBox(self, values=list(STATUS_TUGAS), variable=self.var, state="readonly",
+                        height=42, corner_radius=8, border_width=1, border_color=INPUT_BORDER,
+                        fg_color="white", text_color=NAVY, button_color=HEADER_BG,
+                        button_hover_color="#cfe2fb", font=f(14), dropdown_fg_color="white",
+                        dropdown_text_color=NAVY, dropdown_hover_color=HEADER_BG,
+                        dropdown_font=f(14)).pack(fill="x", padx=28)
+        baris = ctk.CTkFrame(self, fg_color="transparent")
+        baris.pack(anchor="w", padx=28, pady=24)
+        tombol(baris, "Simpan", self._simpan, "biru", width=110, height=40, corner_radius=8).pack(side="left", padx=(0, 12))
+        tombol(baris, "Batal", self.destroy, "garis", width=110, height=40, corner_radius=8).pack(side="left")
+        self.after(150, self._fokus)
+
+    def _fokus(self):
         try:
-            tgl = datetime.strptime(deadline_str, FORMAT_TANGGAL).date()
-        except ValueError:
-            return "-", None
-        selisih = (tgl - date.today()).days
-        if selisih < 0:
-            return "Terlambat", "lewat"
-        if selisih == 0:
-            return "Hari ini", "segera"
-        if selisih <= 3:
-            return f"{selisih} hari lagi", "segera"
-        return f"{selisih} hari lagi", None
+            self.grab_set()
+            self.focus()
+        except Exception:
+            pass
 
-    # --------------------------------------------------------- Helper form
-    def _ambil_input(self):
-        judul = self.entry_judul.get().strip()
-        deskripsi = self.entry_deskripsi.get("0.0", "end").strip()
-        deadline = self.entry_deadline.get().strip()
+    def _simpan(self):
+        self.on_simpan(self.var.get())
+        self.destroy()
 
-        if not judul:
-            messagebox.showwarning("Validasi", "Judul tugas tidak boleh kosong.")
-            self.entry_judul.focus()
-            return None
-        if not deadline:
-            messagebox.showwarning("Validasi", "Deadline tidak boleh kosong.")
-            self.entry_deadline.focus()
-            return None
-        try:
-            datetime.strptime(deadline, FORMAT_TANGGAL)
-        except ValueError:
-            messagebox.showwarning(
-                "Validasi", "Format deadline harus YYYY-MM-DD dan tanggalnya valid.\nContoh: 2026-10-31")
-            self.entry_deadline.focus()
-            return None
-        return judul, deskripsi, deadline
 
-    def _isi_form(self, judul="", deskripsi="", deadline=""):
-        # Entry hanya di-insert bila ada isinya, supaya placeholder muncul kembali saat kosong
-        self.entry_judul.delete(0, "end")
-        if judul:
-            self.entry_judul.insert(0, judul)
-        self.entry_deskripsi.delete("0.0", "end")
-        if deskripsi:
-            self.entry_deskripsi.insert("0.0", deskripsi)
-        self.entry_deadline.delete(0, "end")
-        if deadline:
-            self.entry_deadline.insert(0, deadline)
+# ============================================================== Halaman Daftar
+# (weight, lebar minimum) tiap kolom: ID, Nama tugas, Mata kuliah, Tenggat, Status, Aksi
+KOLOM = [(0, 80), (3, 170), (3, 170), (2, 120), (2, 165), (0, 310)]
 
-    def _set_mode_edit(self, edit: bool):
-        """Mode tambah: Tambah + Simpan. Mode edit: Tambah + Ubah + Hapus."""
-        for btn in (self.btn_tambah, self.btn_simpan, self.btn_ubah, self.btn_hapus):
-            btn.pack_forget()
 
-        self.btn_tambah.pack(pady=4, fill="x")
-        if edit:
-            self.btn_ubah.pack(pady=4, fill="x")
-            self.btn_hapus.pack(pady=4, fill="x")
-            self.label_mode.configure(text=f"Mengubah tugas No. {self.nomor.get(self.selected_id, '-')}")
+def atur_kolom(frame):
+    """Kolom berbobot diberi 'uniform' agar lebarnya identik di header dan semua baris."""
+    for i, (bobot, minimal) in enumerate(KOLOM):
+        frame.grid_columnconfigure(i, weight=bobot, minsize=minimal,
+                                   uniform="data" if bobot else "")
+
+
+class DaftarPage(Halaman):
+    def __init__(self, master, app):
+        super().__init__(master, app)
+        buat_header(self, "HALAMAN DAFTAR", "Daftar Tugas", app)
+
+        cari = ctk.CTkFrame(self, fg_color="transparent")
+        cari.pack(fill="x", padx=70, pady=(0, 16))
+        label(cari, "Pencarian").pack(side="left", padx=(0, 16))
+        self.e_cari = kolom_input(cari, "Cari nama tugas atau mata kuliah", height=46)
+        self.e_cari.pack(side="left", fill="x", expand=True)
+        self.e_cari.bind("<KeyRelease>", lambda e: self.muat())
+
+        kartu = ctk.CTkFrame(self, fg_color="white", corner_radius=14, border_width=1,
+                             border_color=BORDER)
+        kartu.pack(fill="both", expand=True, padx=70, pady=(0, 32))
+
+        kepala = ctk.CTkFrame(kartu, fg_color=HEADER_BG, corner_radius=12)
+        kepala.pack(fill="x", padx=1, pady=(1, 0))
+        dalam = ctk.CTkFrame(kepala, fg_color="transparent")
+        dalam.pack(fill="x", padx=(0, 17))   # sisakan ruang untuk scrollbar
+        atur_kolom(dalam)
+        for i, judul in enumerate(["ID", "Nama tugas", "Mata kuliah", "Tenggat", "Status", "Aksi"]):
+            ctk.CTkLabel(dalam, text=judul, font=f(14, True), text_color=HEADER_FG,
+                         anchor="w").grid(row=0, column=i, sticky="w",
+                                          padx=(24 if i == 0 else 8, 8), pady=16)
+
+        self.body = ctk.CTkScrollableFrame(
+            kartu, fg_color="white", corner_radius=0, scrollbar_fg_color="white",
+            scrollbar_button_color=BORDER, scrollbar_button_hover_color=INPUT_BORDER)
+        self.body.pack(fill="both", expand=True, padx=1, pady=(0, 1))
+
+    def on_show(self, **kwargs):
+        kosongkan(self.e_cari)
+        self.muat()
+
+    def muat(self):
+        kata = self.e_cari.get().strip()
+        self._render(self.ctrl.cari(kata), bool(kata))
+
+    def _render(self, data, ada_kata):
+        for w in self.body.winfo_children():
+            w.destroy()
+
+        if not data:
+            pesan = ("Tugas tidak ditemukan." if ada_kata
+                     else "Belum ada tugas. Tambahkan melalui Formulir Tugas.")
+            ctk.CTkLabel(self.body, text=pesan, font=f(15), text_color=MUTED).pack(pady=50)
+            return
+
+        for i, t in enumerate(data):
+            baris = ctk.CTkFrame(self.body, fg_color="white" if i % 2 == 0 else ROW_ALT,
+                                 corner_radius=0)
+            baris.pack(fill="x")
+            atur_kolom(baris)
+
+            isi = [f"{t['no']:03d}", t["nama_tugas"], t["mata_kuliah"],
+                   self.ctrl.tampil_tanggal(t["tenggat"]), t["status"]]
+            for c, teks in enumerate(isi):
+                ctk.CTkLabel(baris, text=teks, font=f(14), text_color=NAVY, anchor="w",
+                             justify="left", wraplength=160 if c in (1, 2) else 0
+                             ).grid(row=0, column=c, sticky="w",
+                                    padx=(24 if c == 0 else 8, 8), pady=16)
+
+            aksi = ctk.CTkFrame(baris, fg_color="transparent")
+            aksi.grid(row=0, column=5, sticky="w", padx=(14, 8))
+            kw = dict(height=38, corner_radius=8, font=f(13, True))
+            tombol(aksi, "Edit", lambda t=t: self.edit(t), "amber", width=68, **kw).pack(side="left", padx=(0, 8))
+            tombol(aksi, "Ubah Status", lambda t=t: self.ubah_status(t), "biru", width=108, **kw).pack(side="left", padx=(0, 8))
+            tombol(aksi, "Hapus", lambda t=t: self.hapus(t), "merah", width=68, **kw).pack(side="left")
+
+            ctk.CTkFrame(self.body, height=1, fg_color=BORDER, corner_radius=0).pack(fill="x")
+
+    # -------------------------------------------------------------- aksi
+    def edit(self, tugas):
+        self.app.tampil("form", tugas=tugas)
+
+    def ubah_status(self, tugas):
+        DialogStatus(self.app, tugas["nama_tugas"], tugas["status"],
+                     lambda status: self._simpan_status(tugas["id"], status))
+
+    def _simpan_status(self, id_tugas, status):
+        ok, pesan = self.ctrl.ubah_status(id_tugas, status)
+        if ok:
+            self.muat()
         else:
-            self.btn_simpan.pack(pady=4, fill="x")
-            self.label_mode.configure(text="Tambah tugas baru")
+            messagebox.showerror("Gagal", pesan)
 
-    # ------------------------------------------------------------- Aksi
-    def simpan_data(self):
-        hasil = self._ambil_input()
-        if hasil is None:
+    def hapus(self, tugas):   # BR-05: wajib konfirmasi
+        if not messagebox.askyesno("Konfirmasi Hapus",
+                                   f"Yakin ingin menghapus tugas:\n\"{tugas['nama_tugas']}\" ?"):
             return
-        if self.controller.tambah_tugas(*hasil):
-            messagebox.showinfo("Sukses", "Data tugas berhasil disimpan!")
-            self.clear_form()
-            self.load_data()
+        ok, pesan = self.ctrl.hapus(tugas["id"])
+        if ok:
+            self.muat()   # nomor urut otomatis dihitung ulang
         else:
-            messagebox.showerror("Gagal", "Data gagal disimpan. Periksa koneksi database.")
+            messagebox.showerror("Gagal", pesan)
 
-    def ubah_data(self):
-        if self.selected_id is None:
-            messagebox.showwarning("Peringatan", "Pilih tugas pada tabel terlebih dahulu!")
-            return
-        hasil = self._ambil_input()
-        if hasil is None:
-            return
-        if self.controller.perbarui_tugas(self.selected_id, *hasil):
-            messagebox.showinfo("Sukses", "Data tugas berhasil diperbarui!")
-            self.clear_form()
-            self.load_data()
-        else:
-            messagebox.showerror("Gagal", "Gagal memperbarui data.")
 
-    def hapus_data(self):
-        if self.selected_id is None:
-            messagebox.showwarning("Peringatan", "Pilih tugas pada tabel terlebih dahulu!")
-            return
-        judul = self.entry_judul.get().strip() or f"No. {self.nomor.get(self.selected_id)}"
-        if not messagebox.askyesno("Konfirmasi Hapus", f"Yakin ingin menghapus tugas:\n\"{judul}\" ?"):
-            return
-        if self.controller.hapus_tugas(self.selected_id):
-            messagebox.showinfo("Sukses", "Data tugas berhasil dihapus!")
-            self.clear_form()
-            self.load_data()   # nomor otomatis dihitung ulang, jadi tetap urut
-        else:
-            messagebox.showerror("Gagal", "Gagal menghapus data.")
+# ================================================================ Jendela utama
+class TugasView(ctk.CTk):
+    def __init__(self):
+        super().__init__(fg_color=BG)
+        self.controller = TugasController()
+        self.title("Pengelolaan Tugas Mahasiswa")
+        self.geometry("1200x720")
+        self.minsize(1100, 680)
 
-    def pilih_baris(self, event=None):
-        pilihan = self.tree.selection()
-        if not pilihan:
-            return
-        id_tugas = int(pilihan[0])
-        row = self.data_cache.get(id_tugas)
-        if row is None:
-            return
-        self.selected_id = id_tugas
-        self._isi_form(str(row["judul_tugas"] or ""),
-                       str(row["deskripsi"] or ""),
-                       str(row["deadline"] or "")[:10])
-        self._set_mode_edit(True)
+        wadah = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
+        wadah.pack(fill="both", expand=True)
 
-    def klik_tabel(self, event):
-        """Klik area kosong pada tabel -> kembali ke mode tambah."""
-        if not self.tree.identify_row(event.y) and self.selected_id is not None:
-            self.clear_form()
+        self.halaman = {
+            "login": LoginPage(wadah, self),
+            "dashboard": DashboardPage(wadah, self),
+            "form": FormPage(wadah, self),
+            "daftar": DaftarPage(wadah, self),
+        }
+        for h in self.halaman.values():
+            h.place(relx=0, rely=0, relwidth=1, relheight=1)
 
-    def clear_form(self):
-        self.selected_id = None
-        if self.tree.selection():
-            self.tree.selection_remove(self.tree.selection())
-        self._isi_form()
-        self._set_mode_edit(False)
-        self.focus()   # lepas fokus dari entry agar placeholder tampil
+        self.tampil("login")
+
+    def tampil(self, nama, **kwargs):
+        h = self.halaman[nama]
+        h.on_show(**kwargs)
+        h.tkraise()
 
 
 if __name__ == "__main__":
-    app = TugasView()
-    app.mainloop()
+    TugasView().mainloop()
