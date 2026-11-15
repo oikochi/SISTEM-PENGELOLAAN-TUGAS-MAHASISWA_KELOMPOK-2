@@ -1,0 +1,52 @@
+name: Python CI Pipeline - SITAMA (Sistem Pengelolaan Tugas Mahasiswa)
+
+# Pipeline akan berjalan otomatis saat ada push atau pull request ke branch main
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: sitama
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: 1. Mengambil Kode dari Repositori (Checkout)
+        uses: actions/checkout@v4
+
+      - name: 2. Menyiapkan Lingkungan Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 3. Menginstal Dependensi Proyek
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: 4. Menunggu MySQL Siap
+        run: |
+          until mysqladmin ping -h 127.0.0.1 --silent; do
+            echo "Menunggu MySQL siap..."
+            sleep 2
+          done
+
+      - name: 5. Menjalankan Automated Unit Testing (Pytest)
+        run: |
+          python -m pytest -v
