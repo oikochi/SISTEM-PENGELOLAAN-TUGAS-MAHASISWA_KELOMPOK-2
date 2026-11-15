@@ -1,45 +1,64 @@
-import os
-import sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 from config.database import koneksi, init_db
 
 
 class TugasModel:
-    """Mengelola data tugas. Semua query memakai parameter (NFR-02)."""
-
     def __init__(self):
         init_db()
 
     def tambah_tugas(self, nama, mata_kuliah, deskripsi, tenggat, status):
         with koneksi() as conn:
-            conn.execute(
+            cursor = conn.cursor()
+            cursor.execute(
                 "INSERT INTO tugas (nama_tugas, mata_kuliah, deskripsi, tenggat, status) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "VALUES (%s, %s, %s, %s, %s)",
                 (nama, mata_kuliah, deskripsi or None, tenggat, status),
             )
-        return True
+            cursor.close()
 
     def tampilkan_tugas(self):
         with koneksi() as conn:
-            baris = conn.execute("SELECT * FROM tugas ORDER BY id ASC").fetchall()
-        return [dict(b) for b in baris]
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT * FROM tugas ORDER BY id")
+            hasil = cursor.fetchall()
+            cursor.close()
+            return hasil
 
     def edit_tugas(self, id_tugas, nama, mata_kuliah, deskripsi, tenggat, status):
         with koneksi() as conn:
-            cur = conn.execute(
-                "UPDATE tugas SET nama_tugas=?, mata_kuliah=?, deskripsi=?, tenggat=?, status=? "
-                "WHERE id=?",
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE tugas SET nama_tugas=%s, mata_kuliah=%s, deskripsi=%s, "
+                "tenggat=%s, status=%s WHERE id=%s",
                 (nama, mata_kuliah, deskripsi or None, tenggat, status, id_tugas),
             )
-            return cur.rowcount > 0
+            terpengaruh = cursor.rowcount
+            cursor.close()
+            return terpengaruh > 0
 
-    def ubah_status(self, id_tugas, status):
+    def ubah_status(self, id_tugas, status_baru):
         with koneksi() as conn:
-            cur = conn.execute("UPDATE tugas SET status=? WHERE id=?", (status, id_tugas))
-            return cur.rowcount > 0
+            cursor = conn.cursor()
+            cursor.execute("UPDATE tugas SET status=%s WHERE id=%s", (status_baru, id_tugas))
+            terpengaruh = cursor.rowcount
+            cursor.close()
+            return terpengaruh > 0
 
     def hapus_tugas(self, id_tugas):
         with koneksi() as conn:
-            cur = conn.execute("DELETE FROM tugas WHERE id=?", (id_tugas,))
-            return cur.rowcount > 0
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM tugas WHERE id=%s", (id_tugas,))
+            terpengaruh = cursor.rowcount
+            cursor.close()
+            return terpengaruh > 0
+
+    def cari_tugas(self, kata_kunci):
+        with koneksi() as conn:
+            cursor = conn.cursor(dictionary=True)
+            pola = f"%{kata_kunci}%"
+            cursor.execute(
+                "SELECT * FROM tugas WHERE nama_tugas LIKE %s OR mata_kuliah LIKE %s ORDER BY id",
+                (pola, pola),
+            )
+            hasil = cursor.fetchall()
+            cursor.close()
+            return hasil
