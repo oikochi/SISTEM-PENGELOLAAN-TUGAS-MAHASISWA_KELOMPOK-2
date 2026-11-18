@@ -150,6 +150,7 @@ class TabelData(ctk.CTkFrame):
         self.kolom_badge = kolom_badge  # indeks kolom yang dirender sebagai badge
         self._baris = []
         self._idx_terpilih = None
+        self._pesan_kosong = None  # referensi label "Belum ada data", agar ikut dibersihkan
 
         header = ctk.CTkFrame(self, fg_color="#E8F0FE", corner_radius=0, height=48)
         header.pack(fill="x")
@@ -170,10 +171,14 @@ class TabelData(ctk.CTkFrame):
             b["frame"].destroy()
         self._baris.clear()
         self._idx_terpilih = None
+        if self._pesan_kosong is not None:
+            self._pesan_kosong.destroy()
+            self._pesan_kosong = None
 
     def kosong_pesan(self, teks):
-        ctk.CTkLabel(self.body, text=teks, font=t.FONT_LABEL,
-                     text_color=t.WARNA_TEKS_SEKUNDER).pack(pady=24)
+        self._pesan_kosong = ctk.CTkLabel(self.body, text=teks, font=t.FONT_LABEL,
+                                           text_color=t.WARNA_TEKS_SEKUNDER)
+        self._pesan_kosong.pack(pady=24)
 
     def tambah_baris(self, nilai, data=None, bg=None, warna_teks=None, warna_badge=None):
         """warna_badge: warna solid untuk kolom badge (dipakai hanya jika kolom_badge diset)."""
